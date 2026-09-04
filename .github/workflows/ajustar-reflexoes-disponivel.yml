@@ -1,0 +1,50 @@
+name: Ajustar disponível nas reflexões
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ajustar-reflexoes-disponivel.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ajustar reflexões
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+
+          old="function projectedBalance(m){return Number(m.summary?.saldoProjetado??((m.summary?.receitaLancada||0)-(m.summary?.comprometido||0)))||0}"
+          new="function projectedGross(m){let v=Number(m.summary?.receitaLancada||0);if(v)return v;return monthTx(m).filter(t=>t.type==='Receita'&&t.status!=='Cancelado').reduce((a,t)=>a+t.value,0)}function projectedCommitted(m){let v=Number(m.summary?.comprometido||0);if(v)return v;return monthTx(m).filter(t=>t.type==='Despesa'&&t.status!=='Cancelado').reduce((a,t)=>a+t.value,0)}function projectedBalance(m){return projectedGross(m)-projectedCommitted(m)}"
+          if old in s:s=s.replace(old,new,1)
+
+          old_card="<div class=\"card reflection-card\"><div class=\"r-icon\">✈️</div><div class=\"r-label\">Maior folga projetada</div><div class=\"r-value\">${bestCash.label}</div><div class=\"r-text\">Saldo projetado de ${money(projectedBalance(bestCash))} antes de uma nova meta.</div><span class=\"confidence\">Confiança ${dataConfidence(bestCash).toLowerCase()}</span></div>"
+          new_card="<div class=\"card reflection-card\"><div class=\"r-icon\">✈️</div><div class=\"r-label\">Maior folga projetada</div><div class=\"r-value\">${bestCash.label}</div><div class=\"r-text\">Receitas projetadas: <b>${money(projectedGross(bestCash))}</b><br>Compromissos já previstos: <b>${money(projectedCommitted(bestCash))}</b><br>Disponível real: <b>${money(projectedBalance(bestCash))}</b>.</div><span class=\"confidence\">Confiança ${dataConfidence(bestCash).toLowerCase()}</span></div>"
+          if old_card in s:s=s.replace(old_card,new_card,1)
+
+          old_sim="let name=$('#goalName').value||'Meta',cost=Number($('#goalCost').value||0),left=Number($('#goalLeftover').value||0),safety=Number($('#goalSafety').value||0),bal=projectedBalance(m);"
+          new_sim="let name=$('#goalName').value||'Meta',cost=Number($('#goalCost').value||0),left=Number($('#goalLeftover').value||0),safety=Number($('#goalSafety').value||0),gross=projectedGross(m),committed=projectedCommitted(m),bal=projectedBalance(m),prudent=Math.max(0,bal-safety);"
+          if old_sim in s:s=s.replace(old_sim,new_sim,1)
+
+          old_result="<div class=\"r-text\">Saldo projetado antes da meta: <b>${money(bal)}</b>.<br>Para gastar ${money(cost)}, terminar com ${money(left)} e ainda preservar ${money(safety)} de segurança, você precisa de ${money(need)}.</div>"
+          new_result="<div class=\"r-text\"><b>Como o disponível é formado:</b><br>Saldo bruto projetado (receitas): <b>${money(gross)}</b><br>− Compromissos já previstos: <b>${money(committed)}</b><br>= Disponível real para decisão: <b>${money(bal)}</b><br>− Margem de segurança: <b>${money(safety)}</b><br>= Disponível prudente: <b>${money(prudent)}</b>.<br><br>Para gastar ${money(cost)}, terminar com ${money(left)} e preservar a margem de segurança, você precisa de ${money(need)}.</div>"
+          if old_result in s:s=s.replace(old_result,new_result,1)
+
+          css='.goal-result .r-text b{color:var(--ink)}.goal-result .r-text{line-height:1.65}.reflection-card .r-text b{color:var(--ink)}'
+          if css not in s:s=s.replace('</style>',css+'</style>',1)
+
+          p.write_text(s,encoding='utf-8')
+      - name: Commit
+        run: |
+          git config user.name "ChatGPT"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "Deixa composição do disponível transparente nas reflexões"
+          git push
