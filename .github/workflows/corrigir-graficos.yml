@@ -1,0 +1,46 @@
+name: Corrigir gráficos e menu
+
+on:
+  push:
+    paths:
+      - '.github/workflows/corrigir-graficos.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aplicar correções
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('<button data-page="installments">↻ &nbsp;Parcelamentos</button>','')
+          s=s.replace('<button data-page="installments">Parcelas</button>','')
+          s=s.replace('.mobile-nav{grid-template-columns:repeat(7,1fr)!important}', '.mobile-nav{grid-template-columns:repeat(6,1fr)!important}')
+          s=s.replace(",installments:['Parcelamentos','Compromissos futuros identificados nos lançamentos.']", '')
+          s=s.replace('renderTransactions();renderInstallments();renderInvestments();','renderTransactions();renderInvestments();')
+          start=s.find('<section id="installments" class="page">')
+          if start!=-1:
+              end=s.find('</section>',start)
+              if end!=-1:s=s[:start]+s[end+10:]
+          old='<div class="card"><div class="section-head"><h2>Receita, despesa e resultado por mês</h2><span class="chart-title-note">Resultado operacional = renda recorrente − custo próprio da família</span></div><div class="chart" id="trendChart" style="height:275px"></div><div class="legend"><span><i style="background:#5b98a4"></i>Receita recorrente</span><span><i style="background:#ee7566"></i>Despesa familiar</span><span><i style="background:#354f5d"></i>Resultado operacional</span></div></div>'
+          new='<div class="card"><div class="section-head"><h2>Receita × despesa × resultado</h2><span class="chart-title-note">histórico mensal do ano selecionado</span></div><div class="chart" id="trendChart" style="height:275px"></div><div class="legend"><span><i style="background:#5b98a4"></i>Receitas</span><span><i style="background:#ee7566"></i>Despesas</span><span><i style="background:#277a4b"></i>Resultado positivo</span><span><i style="background:#b93838"></i>Resultado negativo</span></div></div>'
+          s=s.replace(old,new)
+          pat=r'function renderTrend\(\)\{.*?\}\nfunction renderDonut'
+          repl='''function renderTrend(){\nlet arr=dashboardMonths();if(!arr.length)arr=[monthObj()];\nlet W=700,H=250,pad=36,zero=H-pad;\nlet reads=arr.map(m=>{let tx=monthTx(m).filter(t=>t.status!==\'Cancelado\'),sum=m.summary||{};if(tx.length){let k=calc(m);return{income:Number(k.launched||k.planned||0),expense:Number(k.committed||0),result:Number(k.projectedBalance||0)}}let income=Number(sum.receitaLancada||sum.receitaPlanejada||0),expense=Number(sum.comprometido||0);let result=Number.isFinite(Number(sum.saldoProjetado))?Number(sum.saldoProjetado):(income-expense);return{income,expense,result}});\nlet max=Math.max(...reads.flatMap(r=>[r.income,r.expense,Math.abs(r.result)]),1)*1.15,band=(W-2*pad)/arr.length,barW=Math.min(26,band*.28),y=v=>zero-(Math.max(0,v)/max)*(H-2*pad);\nlet bars=arr.map((m,i)=>{let r=reads[i],cx=pad+band*i+band/2,ry=r.result>=0?y(r.result):zero+Math.min(30,(-r.result/max)*(H-2*pad)),rc=r.result>=0?\'#277a4b\':\'#b93838\';return`<rect x="${cx-barW-2}" y="${y(r.income)}" width="${barW}" height="${Math.max(0,zero-y(r.income))}" rx="3" fill="#5b98a4"/><rect x="${cx+2}" y="${y(r.expense)}" width="${barW}" height="${Math.max(0,zero-y(r.expense))}" rx="3" fill="#ee7566"/><circle cx="${cx}" cy="${ry}" r="4" fill="${rc}"/><text x="${cx}" y="${H-7}" text-anchor="middle" font-size="8" fill="#77838c">${String(m.label||\'\').split(\'-\')[0]}</text>`}).join(\'\');\n$(\'#trendChart\').innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="${pad}" y1="${zero}" x2="${W-pad}" y2="${zero}" stroke="#dbe1e2"/>${bars}</svg>`}\nfunction renderDonut'''
+          s,n=re.subn(pat,repl,s,flags=re.S)
+          if n!=1: raise SystemExit(f'renderTrend não localizado: {n}')
+          p.write_text(s,encoding='utf-8')
+      - name: Salvar versão corrigida
+        run: |
+          git config user.name "ChatGPT"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          git commit -m "Corrige gráficos históricos e remove Parcelamentos"
+          git push
