@@ -1,0 +1,73 @@
+name: Adicionar pagamentos e desempenho
+
+on:
+  push:
+    paths:
+      - '.github/workflows/adicionar-pagamentos-desempenho.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atualizar index
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          if '/* === pagamentos + humor mensal === */' in s:
+              raise SystemExit(0)
+
+          css='''
+          /* === pagamentos + humor mensal === */
+          .payments-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.payment-card{border:1px solid var(--line);border-radius:16px;padding:16px;background:#fff}.payment-card .pay-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.payment-card h3{margin:0;font-size:16px}.payment-card .pay-value{font-size:25px;font-weight:900;margin:12px 0 5px}.payment-meta{font-size:11px;color:var(--muted);line-height:1.5}.payment-card select{margin-top:12px;width:100%}.pay-await{border-top:4px solid var(--warn)}.pay-paid{border-top:4px solid var(--ok)}.pay-partial{border-top:4px solid var(--coral)}.month-mood{display:flex;gap:13px;align-items:center;padding:12px 14px;margin-bottom:12px;border:1px solid rgba(255,255,255,.16);border-radius:15px;background:rgba(255,255,255,.08)}.month-mood .emoji{font-size:40px;line-height:1}.month-mood b{display:block;font-size:14px}.month-mood span{font-size:10px;color:#d9e8ed;line-height:1.4}.general-pay-table td select{min-width:115px;padding:6px;font-size:11px}@media(max-width:900px){.payments-grid{grid-template-columns:1fr 1fr}}@media(max-width:620px){.payments-grid{grid-template-columns:1fr}}
+          '''
+          s=s.replace('</style>',css+'</style>',1)
+
+          s=s.replace('<button data-page="add">＋ &nbsp;Adicionar</button><button data-page="investments">◆ &nbsp;Investimentos</button>','<button data-page="add">＋ &nbsp;Adicionar</button><button data-page="payments">✓ &nbsp;Pagamentos</button><button data-page="investments">◆ &nbsp;Investimentos</button>',1)
+          s=s.replace('<button data-page="add">Adicionar</button><button data-page="investments">Investir</button>','<button data-page="add">Adicionar</button><button data-page="payments">Pagto.</button><button data-page="investments">Investir</button>',1)
+          s=s.replace('.mobile-nav{grid-template-columns:repeat(6,1fr)!important}','.mobile-nav{grid-template-columns:repeat(7,1fr)!important}',1)
+
+          page='''
+          <section id="payments" class="page"><div class="section-head"><div><h2 style="margin:0">Pagamentos do mês</h2><span>Controle de quitação — não duplica despesas nos gráficos</span></div></div><div class="payments-grid section" id="creditCardPayments"></div><div class="section card"><div class="section-head"><h2>Contas gerais</h2><span>obrigações fora dos cartões</span></div><div class="table-wrap"><table class="general-pay-table"><thead><tr><th>Conta</th><th>Vencimento</th><th>Descrição</th><th>Valor</th><th>Status</th></tr></thead><tbody id="generalPaymentsRows"></tbody></table></div></div></section>
+          '''
+          s=s.replace('<section id="investments" class="page">',page+'<section id="investments" class="page">',1)
+
+          mood='''
+          function monthMood(R,score,cats){let over=cats.reduce((a,c)=>a+Math.max(0,c.used-c.budget),0),budget=cats.reduce((a,c)=>a+c.budget,0);if(R.operational>0&&R.finalCash>0&&score>=80&&over<=budget*.05)return{emoji:'🚀',title:'Mês excelente',text:'Operação positiva, caixa saudável e orçamento bem controlado.'};if(R.operational>=0&&R.finalCash>=0&&score>=65)return{emoji:'😄',title:'Mês saudável',text:'A renda recorrente cobriu o mês e o desempenho está equilibrado.'};if(R.finalCash>=0&&R.operational<0)return{emoji:'🙂',title:'Caixa positivo, mas atenção',text:'O caixa fecha positivo, porém a operação recorrente ainda está pressionada.'};if(score<45||R.finalCash<0)return{emoji:'😠',title:'Mês pressionado',text:'Despesas e compromissos exigem atenção imediata.'};return{emoji:'😐',title:'Mês de atenção',text:'Há sinais mistos; acompanhe orçamento e compromissos antes de ampliar gastos.'}}
+          '''
+          s=s.replace('function renderDashboard(){',mood+'function renderDashboard(){',1)
+          old="$('#healthScoreText').textContent=`Saúde financeira ${score}/100`;let status=R.operational>=0?'Sobra operacional real':R.finalCash>=0?'Caixa positivo, operação negativa':'Mês deficitário';$('#decisionRead').innerHTML=`<div class=\"decision-status\">${status}</div>"
+          new="$('#healthScoreText').textContent=`Saúde financeira ${score}/100`;let mood=monthMood(R,score,cats),status=R.operational>=0?'Sobra operacional real':R.finalCash>=0?'Caixa positivo, operação negativa':'Mês deficitário';$('#decisionRead').innerHTML=`<div class=\"month-mood\"><div class=\"emoji\">${mood.emoji}</div><div><b>${mood.title}</b><span>${mood.text}</span></div></div><div class=\"decision-status\">${status}</div>"
+          s=s.replace(old,new,1)
+
+          pay='''
+          function cardIssuer(account){let a=(account||'').toLowerCase();if(a.includes('nubank'))return'Nubank';if(a.includes('santander'))return'Santander';if(a.includes('itaú')||a.includes('itau'))return'Itaú';return null}function paymentKey(label,name){return `${label}::${name}`}function getPaymentStatus(label,name,def='Aguardando'){S.settings=S.settings||{};S.settings.paymentStatuses=S.settings.paymentStatuses||{};return S.settings.paymentStatuses[paymentKey(label,name)]||def}async function setPaymentStatus(label,name,status){S.settings=S.settings||{};S.settings.paymentStatuses=S.settings.paymentStatuses||{};S.settings.paymentStatuses[paymentKey(label,name)]=status;await save();renderPayments()}window.setPaymentStatus=setPaymentStatus;function paymentClass(st){return st==='Pago'?'pay-paid':st==='Parcial'?'pay-partial':'pay-await'}function paymentStatusOptions(st){return ['Aguardando','Parcial','Pago'].map(x=>`<option ${x===st?'selected':''}>${x}</option>`).join('')}function renderPayments(){let m=monthObj(),tx=monthTx(m).filter(t=>t.type==='Despesa'&&t.status!=='Cancelado'),label=m.label||m.key;let groups={Santander:0,Nubank:0,'Itaú':0};tx.forEach(t=>{let issuer=cardIssuer(t.account);if(issuer)groups[issuer]+=t.value});if(label==='Set-26'){groups.Santander=12162.53;groups.Nubank=1121.54}let due={Santander:label==='Set-26'?'04/09/2026':'—',Nubank:label==='Set-26'?'11/09/2026':'—','Itaú':'—'};let defaults={Santander:label==='Set-26'?'Pago':'Aguardando',Nubank:'Aguardando','Itaú':'Aguardando'};$('#creditCardPayments').innerHTML=Object.entries(groups).filter(([k,v])=>v>0||label==='Set-26').map(([name,value])=>{let st=getPaymentStatus(label,name,defaults[name]);return `<div class="payment-card ${paymentClass(st)}"><div class="pay-head"><div><h3>${name}</h3><div class="payment-meta">Fatura do mês</div></div>${pill(st)}</div><div class="pay-value">${money(value)}</div><div class="payment-meta">Vencimento: <b>${due[name]}</b><br>O pagamento da fatura não entra novamente como despesa.</div><select onchange="setPaymentStatus('${label}','${name}',this.value)">${paymentStatusOptions(st)}</select></div>`}).join('');let general=tx.filter(t=>!cardIssuer(t.account)&&!['Previstos','Receita'].includes(t.account));$('#generalPaymentsRows').innerHTML=general.sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(t=>{let name=t.description,st=getPaymentStatus(label,'geral:'+name,t.status==='Pago'?'Pago':'Aguardando');return `<tr><td>${t.account||'Conta geral'}</td><td>${fmtDate(t.date)}</td><td>${t.description}</td><td class="money">${money(t.value)}</td><td><select onchange="setPaymentStatus('${label}','geral:${String(name).replace(/'/g,"\\'")}',this.value)">${paymentStatusOptions(st)}</select></td></tr>`}).join('')||'<tr><td colspan="5" class="empty">Sem contas gerais cadastradas para este mês.</td></tr>'}
+          '''
+          s=s.replace('function renderSettings(){',pay+'function renderSettings(){',1)
+          s=s.replace('function renderAll(){renderDashboard();renderMonth();renderTransactions();renderInvestments();renderSettings()}','function renderAll(){renderDashboard();renderMonth();renderTransactions();renderPayments();renderInvestments();renderSettings()}',1)
+          s=s.replace("add:['Adicionar','Inclusão manual de despesa, receita, reembolso ou parcelamento.'],investments:","add:['Adicionar','Inclusão manual de despesa, receita, reembolso ou parcelamento.'],payments:['Pagamentos','Acompanhe cartões e contas gerais sem duplicar as despesas.'],investments:",1)
+          s=s.replace("let a=dashFilteredTx(m).filter(t=>t.type==='Despesa').sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,8);","let a=dashFilteredTx(m).filter(t=>t.type==='Despesa').sort((a,b)=>String(b.importedAt||b.date).localeCompare(String(a.importedAt||a.date))).slice(0,8);",1)
+          p.write_text(s,encoding='utf-8')
+      - name: Validar JavaScript
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          s=Path('index.html').read_text(encoding='utf-8')
+          b=re.findall(r'<script(?![^>]*\\bsrc=)[^>]*>(.*?)</script>',s,re.S|re.I)
+          Path('/tmp/app.js').write_text('\n'.join(b),encoding='utf-8')
+          PY
+          node --check /tmp/app.js
+      - name: Commit
+        run: |
+          git config user.name "ChatGPT"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "Adiciona Pagamentos e indicador de desempenho"
+          git push
