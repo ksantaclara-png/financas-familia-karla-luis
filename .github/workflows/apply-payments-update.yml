@@ -1,0 +1,25 @@
+name: Apply payments update
+on:
+  push:
+    paths:
+      - 'patch_payments.py'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python patch_payments.py
+      - name: Commit update
+        run: |
+          git config user.name "ChatGPT"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Atualiza pagamentos com valores finais pagos e recebidos"
+            git push
+          fi
