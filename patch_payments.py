@@ -25,9 +25,11 @@ if 'id="paymentFilter"' not in s:
 
 # Atualização visual imediata ao dar baixa ou alterar valor final
 s = s.replace("async function setPaymentStatus(label,name,status){S.settings=S.settings||{};S.settings.paymentStatuses=S.settings.paymentStatuses||{};S.settings.paymentStatuses[paymentKey(label,name)]=status;await save();renderPayments()}",
-              "async function setPaymentStatus(label,name,status){S.settings=S.settings||{};S.settings.paymentStatuses=S.settings.paymentStatuses||{};S.settings.paymentStatuses[paymentKey(label,name)]=status;renderPayments();await save()}")
+              "async function setPaymentStatus(label,name,status){S.settings=S.settings||{};S.settings.paymentStatuses=S.settings.paymentStatuses||{};S.settings.paymentStatuses[paymentKey(label,name)]=status;renderPayments();renderMonth();await save()}")
 s = s.replace("async function setPaymentActual(label,name,value){S.settings=S.settings||{};S.settings.paymentActuals=S.settings.paymentActuals||{};let key=paymentKey(label,name);if(value==='')delete S.settings.paymentActuals[key];else S.settings.paymentActuals[key]=Number(value);await save();renderPayments()}",
-              "async function setPaymentActual(label,name,value){S.settings=S.settings||{};S.settings.paymentActuals=S.settings.paymentActuals||{};let key=paymentKey(label,name);if(value==='')delete S.settings.paymentActuals[key];else S.settings.paymentActuals[key]=Number(value);renderPayments();await save()}")
+              "async function setPaymentActual(label,name,value){S.settings=S.settings||{};S.settings.paymentActuals=S.settings.paymentActuals||{};let key=paymentKey(label,name);if(value==='')delete S.settings.paymentActuals[key];else S.settings.paymentActuals[key]=Number(value);renderPayments();renderMonth();await save()}")
+# Caso a versão anterior já esteja aplicada, adiciona renderMonth nela
+s = s.replace("renderPayments();await save()}", "renderPayments();renderMonth();await save()}")
 
 replacement = r'''let paymentViewFilter='all';
 function setPaymentFilter(v){paymentViewFilter=v||'all';renderPayments()}window.setPaymentFilter=setPaymentFilter;
@@ -70,5 +72,45 @@ if n!=1:
     raise SystemExit(f'Função renderPayments não encontrada: {n}')
 s=s2
 
+# === Planejado x realizado na Visão mensal ===
+if '/* === mensal planejado realizado === */' not in s:
+    css = '''\n/* === mensal planejado realizado === */\n.month-compare-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.month-compare-card{border:1px solid var(--line);border-radius:16px;padding:16px;background:#fff}.month-compare-card .mc-title{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:850}.month-compare-values{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.month-compare-values small{display:block;color:var(--muted);font-size:9px}.month-compare-values b{display:block;font-size:18px;margin-top:3px}.month-compare-diff{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:11px}.compare-bar{height:8px;background:#edf1f3;border-radius:99px;overflow:hidden;margin-top:8px}.compare-bar i{display:block;height:100%;border-radius:99px;background:var(--teal)}.compare-table td:nth-child(n+2),.compare-table th:nth-child(n+2){text-align:right}.compare-good{color:var(--ok);font-weight:800}.compare-warn{color:var(--bad);font-weight:800}@media(max-width:900px){.month-compare-grid{grid-template-columns:1fr}}\n'''
+    s=s.replace('</style>',css+'</style>',1)
+
+month_old='<section id="month" class="page"><div class="grid month-summary" id="monthKpis"></div><div class="section card"><div class="section-head"><h2>Disponibilidade por categoria</h2>'
+month_new='<section id="month" class="page"><div class="grid month-summary" id="monthKpis"></div><div class="section"><div class="section-head"><h2>Planejado × realizado</h2><span>valores efetivamente pagos e recebidos</span></div><div class="month-compare-grid" id="monthCompareCards"></div></div><div class="section card"><div class="section-head"><h2>Planejado × realizado por categoria</h2><span>orçamento versus valor efetivamente pago</span></div><div class="table-wrap"><table class="compare-table"><thead><tr><th>Categoria</th><th>Planejado</th><th>Realizado</th><th>Diferença</th><th>Execução</th></tr></thead><tbody id="monthCompareRows"></tbody></table></div></div><div class="section card"><div class="section-head"><h2>Disponibilidade por categoria</h2>'
+if 'id="monthCompareCards"' not in s:
+    if month_old not in s: raise SystemExit('Bloco da Visão mensal não encontrado')
+    s=s.replace(month_old,month_new,1)
+
+helpers=r'''function monthRealized(m){
+ let all=monthTx(m).filter(t=>t.status!=='Cancelado'),label=m.label||m.key;
+ let exp=all.filter(t=>t.type==='Despesa'),inc=all.filter(t=>t.type==='Receita');
+ let groups={Santander:0,Nubank:0,'Itaú':0};exp.forEach(t=>{let issuer=cardIssuer(t.account);if(issuer)groups[issuer]+=t.value});
+ if(label==='Set-26'){groups.Santander=12162.53;groups.Nubank=1121.54}
+ let defaults={Santander:label==='Set-26'?'Pago/Recebido':'Aguardando',Nubank:'Aguardando','Itaú':'Aguardando'},cardRatio={};
+ Object.entries(groups).forEach(([name,value])=>{let key='card:'+name,st=getPaymentStatus(label,key,defaults[name]),actual=getPaymentActual(label,key),paid=0;if(st==='Pago/Recebido'||st==='Pago')paid=actual!==''?Number(actual):Number(value);else if(st==='Parcial')paid=actual!==''?Math.min(Number(value),Number(actual)):0;cardRatio[name]=value>0?Math.max(0,paid/value):0});
+ let general=all.filter(t=>!(t.type==='Despesa'&&cardIssuer(t.account))&&!['Previstos'].includes(t.account)),generalMap=new Map();general.forEach((t,i)=>generalMap.set(t, i));
+ let byCategory={};S.categories.forEach(c=>byCategory[c]=0);let realizedExpense=0,realizedRevenue=0;
+ exp.forEach(t=>{let issuer=cardIssuer(t.account),v=0;if(issuer){v=t.value*(cardRatio[issuer]||0)}else{let i=general.indexOf(t),key=`geral:${t.type}:${t.description}:${t.date}:${i}`,def=t.status==='Pago'||t.status==='Pago/Recebido'?'Pago/Recebido':'Aguardando',st=getPaymentStatus(label,key,def),actual=getPaymentActual(label,key);if(st==='Pago/Recebido'||st==='Pago')v=actual!==''?Number(actual):t.value;else if(st==='Parcial')v=actual!==''?Math.min(t.value,Number(actual)):0}realizedExpense+=v;byCategory[t.category]=(byCategory[t.category]||0)+v});
+ inc.forEach(t=>{let i=general.indexOf(t),key=`geral:${t.type}:${t.description}:${t.date}:${i}`,def=t.status==='Pago'||t.status==='Pago/Recebido'?'Pago/Recebido':'Aguardando',st=getPaymentStatus(label,key,def),actual=getPaymentActual(label,key),v=0;if(st==='Pago/Recebido'||st==='Pago')v=actual!==''?Number(actual):t.value;else if(st==='Parcial')v=actual!==''?Math.min(t.value,Number(actual)):0;realizedRevenue+=v});
+ let plannedExpense=calc(m).budget,plannedRevenue=Number(m.summary?.receitaPlanejada||0)||inc.reduce((a,t)=>a+t.value,0);
+ return{plannedExpense,plannedRevenue,realizedExpense,realizedRevenue,plannedResult:plannedRevenue-plannedExpense,realizedResult:realizedRevenue-realizedExpense,byCategory}
+}
+function renderMonthComparison(m){let r=monthRealized(m),diffExp=r.realizedExpense-r.plannedExpense,diffRev=r.realizedRevenue-r.plannedRevenue,diffRes=r.realizedResult-r.plannedResult;
+ let card=(title,planned,realized,diff,invert=false)=>{let good=invert?diff<=0:diff>=0,exec=planned?Math.min(1,Math.abs(realized/planned)):0;return `<div class="month-compare-card"><div class="mc-title">${title}</div><div class="month-compare-values"><div><small>Planejado</small><b>${money(planned)}</b></div><div><small>Realizado</small><b>${money(realized)}</b></div></div><div class="compare-bar"><i style="width:${exec*100}%"></i></div><div class="month-compare-diff ${good?'compare-good':'compare-warn'}">${diff===0?'Em linha com o planejado':`${diff>0?'+':''}${money(diff)} vs. planejado`}</div></div>`};
+ $('#monthCompareCards').innerHTML=card('Receitas',r.plannedRevenue,r.realizedRevenue,diffRev)+card('Despesas',r.plannedExpense,r.realizedExpense,diffExp,true)+card('Resultado do mês',r.plannedResult,r.realizedResult,diffRes);
+ $('#monthCompareRows').innerHTML=S.categories.map(name=>{let base=(m.categories||[]).find(c=>c.name===name)||{},planned=Number(base.budget||0),realized=Number(r.byCategory[name]||0),diff=realized-planned,exec=planned?realized/planned:0,good=diff<=0;return `<tr><td>${name}</td><td class="money">${money(planned)}</td><td class="money">${money(realized)}</td><td class="money ${good?'compare-good':'compare-warn'}">${diff>0?'+':''}${money(diff)}</td><td>${planned?pct(exec):'—'}</td></tr>`}).join('')
+}
+'''
+if 'function monthRealized(m)' not in s:
+    anchor='function renderMonth(){'
+    if anchor not in s: raise SystemExit('renderMonth não encontrado')
+    s=s.replace(anchor,helpers+anchor,1)
+
+# Chama a comparação dentro de renderMonth
+if 'renderMonthComparison(m);' not in s:
+    s=s.replace("function renderMonth(){let m=monthObj(),k=calc(m),cats=categoryState(m),tx=monthTx(m).sort((a,b)=>String(b.date).localeCompare(String(a.date)));", "function renderMonth(){let m=monthObj();if(!m)return;let k=calc(m),cats=categoryState(m),tx=monthTx(m).sort((a,b)=>String(b.date).localeCompare(String(a.date)));renderMonthComparison(m);")
+
 p.write_text(s,encoding='utf-8')
-print('Pagamentos com atualização imediata e filtro aplicados')
+print('Pagamentos + planejado x realizado mensal aplicados')
